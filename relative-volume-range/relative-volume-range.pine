@@ -1,0 +1,168 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © sheabot03
+// https://github.com/sheabot/tradingview
+//@version=6
+indicator('Relative Volume and Range', 'RVol, RRange', overlay = true, scale = scale.none)
+
+// Table Display inputs
+string GRP_DISPLAY = 'Table Display'
+string textSizeInput = input.string(
+    title = 'Text Size',
+    defval = size.auto,
+    options = [size.auto, size.tiny, size.small, size.normal, size.large, size.huge],
+    group = GRP_DISPLAY)
+string tablePositionInput = input.string(
+    title = 'Table Position',
+    defval = position.top_right,
+    options = [
+        position.top_left, position.top_center, position.top_right,
+        position.middle_left, position.middle_center, position.middle_right,
+        position.bottom_left, position.bottom_center, position.bottom_right],
+    group = GRP_DISPLAY)
+
+// Relative Volume inputs
+string GRP_VOLUME = 'Relative Volume'
+int volumeLenInput = input.int(
+    title = 'Length',
+    defval = 14,
+    minval = 1,
+    group = GRP_VOLUME)
+int relVolumeUnusualInput = input.int(
+    title = 'Unusual Percent',
+    tooltip = 'Relative volume above this percent is unusual',
+    defval = 200,
+    minval = 1,
+    group = GRP_VOLUME)
+int relVolumeHighInput = input.int(
+    title = 'High Percent',
+    tooltip = 'Relative volume between this percent and Unusual Percent is high.\nRelative volume below this percent is low.',
+    defval = 100,
+    minval = 1,
+    group = GRP_VOLUME)
+color relVolumeUnusualColorInput = input.color(
+    title = 'Unusual Color',
+    tooltip = 'Relative volume above Unusual Percent will change the table row to this color',
+    defval = color.green,
+    group = GRP_VOLUME)
+color relVolumeHighColorInput = input.color(
+    title = 'High Color',
+    tooltip = 'Relative volume between High Percent and Unusual Percent will change the table row to this color',
+    defval = color.yellow,
+    group = GRP_VOLUME)
+color relVolumeLowColorInput = input.color(
+    title = 'Low Color',
+    tooltip = 'Relative volume below High Percent will change the table row to this color',
+    defval = color.silver,
+    group = GRP_VOLUME)
+
+// Validate relative volume inputs
+if relVolumeUnusualInput <= relVolumeHighInput
+    runtime.error('Validation Error: Relative Volume: Unusual Percent must be greater than High Percent')
+
+// Relative Range inputs
+string GRP_RANGE = 'Relative Range'
+int rangeLenInput = input.int(
+    title = 'Length',
+    defval = 14,
+    minval = 1,
+    group = GRP_RANGE)
+int relRangeHighInput = input.int(
+    title = 'High Percent',
+    tooltip = 'Relative range above this percent is high',
+    defval = 90,
+    minval = 1,
+    group = GRP_RANGE)
+int relRangeNormalInput = input.int(
+    title = 'Normal Percent',
+    tooltip = 'Relative range between this percent and High Percent is normal.\nRelative range below this percent is low.',
+    defval = 50,
+    minval = 1,
+    group = GRP_RANGE)
+color relRangeHighColorInput = input.color(
+    title = 'High Color',
+    tooltip = 'Relative range above High Percent will change the table row to this color',
+    defval = color.red,
+    group = GRP_RANGE)
+color relRangeNormalColorInput = input.color(
+    title = 'Normal Color',
+    tooltip = 'Relative range between Normal Percent and High Percent will change the table row to this color',
+    defval = color.yellow,
+    group = GRP_RANGE)
+color relRangeLowColorInput = input.color(
+    title = 'Low Color',
+    tooltip = 'Relative range below Normal Percent will change the table row to this color',
+    defval = color.silver,
+    group = GRP_RANGE)
+
+// Validate relative range inputs
+if relRangeHighInput <= relRangeNormalInput
+    runtime.error('Validation Error: Relative Range: High Percent must be greater than Normal Percent')
+
+// Get timeframe for request.security
+var tf = if timeframe.isweekly
+    'W'
+else if timeframe.ismonthly
+    'M'
+else
+    'D'
+
+// Calculate average volume by bar length over a timeframe
+volumeToday = request.security(syminfo.tickerid, tf, volume)
+volumeAverage = request.security(syminfo.tickerid, tf, ta.sma(volume[1], volumeLenInput))
+
+// Calculate relative volume as a percentage
+relVolume = math.round(volumeToday / volumeAverage * 100)
+
+// Determine relative volume color
+relVolumeColor = if relVolume < relVolumeHighInput
+    relVolumeLowColorInput
+else if relVolume < relVolumeUnusualInput
+    relVolumeHighColorInput
+else
+    relVolumeUnusualColorInput
+
+//@function Pretty print volume as a strig
+//@param value The volume as an integer value
+//@returns The volume rounded to two decimal places as a string with a B, M, or K suffix
+volumeString(value) =>
+    if value >= 1000000000
+        str.format('{0,number,#.##}B', value / 1000000000)
+    else if value >= 1000000
+        str.format('{0,number,#.##}M', value / 1000000)
+    else if value >= 1000
+        str.format('{0,number,#.##}K', value / 1000)
+    else
+        str.format('{0}', value)
+
+// Calculate Average True Range (ATR) and Daily True Range (DTR) by bar length over a timeframe
+atr = request.security(syminfo.tickerid, tf, ta.rma(ta.tr, rangeLenInput), lookahead = barmerge.lookahead_on)
+dtr = request.security(syminfo.tickerid, tf, high - low)
+
+// Calculate relative range as a percentage
+relRange = math.round(dtr / atr * 100)
+
+// Determine relative range color
+relRangeColor = if relRange < relRangeNormalInput
+    relRangeLowColorInput
+else if relRange < relRangeHighInput
+    relRangeNormalColorInput
+else
+    relRangeHighColorInput
+
+// Display output data in a table
+// Optimize by only displaying table on last bar
+var table display = table.new(position = tablePositionInput, columns = 4, rows = 2, border_color = color.black, border_width = 1)
+var string relVolumeLabel = str.format("RVol({0}{1})", volumeLenInput, tf)
+var string relRangeLabel = str.format("RRange({0}{1})", rangeLenInput, tf)
+if barstate.islast
+    // Relative Volume
+    table.cell(display, 0, 0, relVolumeLabel, bgcolor = relVolumeColor, text_size = textSizeInput, text_halign = text.align_left)
+    table.cell(display, 1, 0, str.format('{0}', volumeString(volumeToday)), bgcolor = relVolumeColor, text_size = textSizeInput)
+    table.cell(display, 2, 0, str.format('{0}', volumeString(volumeAverage)), bgcolor = relVolumeColor, text_size = textSizeInput)
+    table.cell(display, 3, 0, str.format('{0}%', relVolume), bgcolor = relVolumeColor, text_size = textSizeInput)
+
+    // Relative Range
+    table.cell(display, 0, 1, relRangeLabel, bgcolor = relRangeColor, text_size = textSizeInput, text_halign = text.align_left)
+    table.cell(display, 1, 1, str.format('{0,number,#.##}', dtr), bgcolor = relRangeColor, text_size = textSizeInput)
+    table.cell(display, 2, 1, str.format('{0,number,#.##}', atr), bgcolor = relRangeColor, text_size = textSizeInput)
+    table.cell(display, 3, 1, str.format('{0}%', relRange), bgcolor = relRangeColor, text_size = textSizeInput)
